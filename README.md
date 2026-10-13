@@ -122,6 +122,24 @@ never part of the package), twice: as shipped, and with
 build switch of the original to its Zig counterpart and the test that
 compares them, and gives the few deliberate differences with their reasons.
 
+## Status
+
+The original calls itself "an early one weekend prototype ... use at your
+own risk". This port is held to a stricter bar than the original's own
+tests:
+
+- It is checked call for call against the original, about 2 million calls
+  per node-index width, with the original's asserts on (below).
+- An independent model checks for overlaps, failures and coalescing after
+  every call.
+- Three bugs planted on purpose were each caught by the tests.
+- The tests found edge cases where the original reads out of bounds: fewer
+  than 2 nodes, and `allocationSize` of an empty allocation in 16-bit mode.
+  The port guards them ([`doc/parity.md`](doc/parity.md)).
+
+The algorithm also has users beyond its author: Patrick Walton's Rust port
+is the allocator behind Bevy's mesh memory.
+
 ## Licence and credits
 
 MIT, the original's licence ([`LICENSE`](LICENSE)); see [`NOTICE`](NOTICE).
