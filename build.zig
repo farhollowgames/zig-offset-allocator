@@ -99,6 +99,32 @@ pub fn build(b: *std.Build) void {
     });
     differential.root_module.linkLibrary(reference);
     test_step.dependOn(&b.addRunArtifact(differential).step);
+
+    // The benchmark: the core against the Ranges layer (bench/bench.zig).
+    // ReleaseFast unless -Dbench-optimize says otherwise; -Dbench-cpu=N runs
+    // it pinned to CPU N with taskset (Linux).
+    const bench_optimize = b.option(std.lang.Optimize, "bench-optimize", "Optimize mode for the benchmark (default ReleaseFast)") orelse .fast;
+    const bench_cpu = b.option([]const u8, "bench-cpu", "Pin the benchmark to this CPU with taskset");
+    const bench_exe = b.addExecutable(.{
+        .name = "bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/bench.zig"),
+            .target = target,
+            .optimize = bench_optimize,
+            .imports = &.{.{ .name = "offset_allocator", .module = b.createModule(.{
+                .root_source_file = b.path("src/root.zig"),
+                .target = target,
+                .optimize = bench_optimize,
+            }) }},
+        }),
+    });
+    const bench_run = if (bench_cpu) |cpu| blk: {
+        const run = b.addSystemCommand(&.{ "taskset", "-c", cpu });
+        run.addArtifactArg(bench_exe);
+        break :blk run;
+    } else b.addRunArtifact(bench_exe);
+    const bench_step = b.step("bench", "Run the benchmark: core against Ranges");
+    bench_step.dependOn(&bench_run.step);
 }
 
 const cpp_flags = [_][]const u8{ "-std=c++20", "-DDEBUG", "-fno-exceptions", "-fno-rtti" };
