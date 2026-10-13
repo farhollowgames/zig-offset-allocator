@@ -95,3 +95,9 @@ declare them `extern`); the port makes them public as `small_float`.
 Added in zig-offset-allocator, beyond the original: `max_max_allocs` (the
 largest node count each width addresses), and `Allocator16` beside
 `Allocator` in one build.
+
+The `Ranges` layer (`src/ranges.zig`: units, byte offsets and
+generation-checked handles) is outside the parity scope: it has no
+counterpart in the original, and it is built on the core without changing
+it, so the comparisons above still cover every line of the translation. Its
+own tests are in `test/ranges_test.zig`.
