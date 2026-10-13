@@ -1,0 +1,16 @@
+.{
+    .name = .offset_allocator,
+    .version = "0.1.0",
+    .fingerprint = 0xd5968282398f4b26, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        ".zigversion",
+        "src",
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+    },
+}

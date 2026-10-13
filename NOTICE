@@ -1,0 +1,20 @@
+zig-offset-allocator
+Copyright 2026 Farhollow Games
+
+A translation to Zig of OffsetAllocator by Sebastian Aaltonen,
+https://github.com/sebbbi/OffsetAllocator (commit 3610a73, 27 March 2023),
+licensed, like the original, under the MIT License (LICENSE). Each
+translated file names its source in its header. The translation keeps the
+original's algorithm and every step that decides an offset, a node index or
+a report, so that it gives the same results; it changes only the language,
+the structure needed to express it in Zig, and the public interface.
+
+    src/offset_allocator.zig  from offsetAllocator.hpp and offsetAllocator.cpp
+    test/original_test.zig    from offsetAllocatorTests.cpp
+
+Original copyright: Copyright (c) 2023 Sebastian Aaltonen (MIT License).
+
+Test-only reference sources (reference/)
+
+The differential tests build the original C++ from reference/, unmodified,
+with its own licence file. It is never part of the library or its package.
