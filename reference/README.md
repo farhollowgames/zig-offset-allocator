@@ -8,7 +8,7 @@ unmodified.
 | directory | source | version | licence |
 | --- | --- | --- | --- |
 | `offset_allocator/` | `offsetAllocator.{cpp,hpp}` from [sebbbi/OffsetAllocator](https://github.com/sebbbi/OffsetAllocator) | commit `3610a73` (27 March 2023) | MIT (`offset_allocator/LICENSE`) |
-| `shim/` | a C ABI over the allocator, written for the tests | | Apache 2.0, as the repository |
+| `shim/` | a C ABI over the allocator, written for the tests | | MIT, as the repository |
 
 The shim includes `offsetAllocator.cpp` instead of compiling it alone: the
 `SmallFloat` functions are defined only there, and the tests read the
