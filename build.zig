@@ -13,8 +13,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // The core (src/offset_allocator.zig) and the Ranges layer
+    // (src/ranges.zig), re-exported by src/root.zig.
     _ = b.addModule("offset_allocator", .{
-        .root_source_file = b.path("src/offset_allocator.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -26,7 +28,7 @@ pub fn build(b: *std.Build) void {
     const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &.{};
 
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("src/offset_allocator.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = test_optimize,
     });
@@ -44,6 +46,28 @@ pub fn build(b: *std.Build) void {
         .filters = test_filters,
     });
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
+
+    // A stale free in Ranges panics in safe builds, which no test can catch
+    // in-process in Zig 0.17: run a program that does it and expect the
+    // abort and the message, for a double free and a free after reset.
+    if (test_optimize == .debug or test_optimize == .safe) {
+        const panic_exe = b.addExecutable(.{
+            .name = "ranges_panic",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/ranges_panic.zig"),
+                .target = target,
+                .optimize = test_optimize,
+                .imports = &.{.{ .name = "offset_allocator", .module = test_mod }},
+            }),
+        });
+        for ([_][]const u8{ "double", "reset" }) |case| {
+            const run = b.addRunArtifact(panic_exe);
+            run.addArg(case);
+            run.expectStdErrMatch("free of a handle that is not live (StaleGeneration)");
+            if (target.result.os.tag != .windows) run.addCheck(.{ .expect_term = .{ .signal = .ABRT } });
+            test_step.dependOn(&run.step);
+        }
+    }
 
     // The original C++, built only for the differential tests: once as
     // shipped and once with 16-bit node indices, each through the shim (see
