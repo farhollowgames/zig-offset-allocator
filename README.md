@@ -131,12 +131,17 @@ MIT, the original's licence ([`LICENSE`](LICENSE)); see [`NOTICE`](NOTICE).
   `3610a73`. Its design is described in the
   [original README](https://github.com/sebbbi/OffsetAllocator#readme); no
   longer write-up by the author was found.
-- The design follows the two-level segregated fit (TLSF) allocator of
-  M. Masmano, I. Ripoll, A. Crespo and J. Real,
+- **The original's reference.** Its README describes it as similar to the
+  two-level segregated fit (TLSF) algorithm, and cites
+  [A comparison of memory allocators for real-time applications](https://www.researchgate.net/profile/Alfons-Crespo/publication/234785757_A_comparison_of_memory_allocators_for_real-time_applications/links/5421d8550cf2a39f4af765f4/A-comparison-of-memory-allocators-for-real-time-applications.pdf)
+  (M. Masmano, I. Ripoll, A. Crespo, J. Real, JTRES 2006) for TLSF's
+  performance and fragmentation.
+- **Background reading:** TLSF itself is described in
   ["TLSF: a new dynamic memory allocator for real-time systems"](https://doi.org/10.1109/EMRTS.2004.1311009)
-  (ECRTS 2004), and the
-  [comparison of memory allocators for real-time applications](https://www.researchgate.net/profile/Alfons-Crespo/publication/234785757_A_comparison_of_memory_allocators_for_real-time_applications/links/5421d8550cf2a39f4af765f4/A-comparison-of-memory-allocators-for-real-time-applications.pdf)
-  the original cites.
+  by the same authors (ECRTS 2004). OffsetAllocator is not a translation of
+  it: TLSF keeps its headers inside the memory it manages, and
+  OffsetAllocator keeps all bookkeeping in separate node arrays, so it can
+  manage memory the CPU cannot touch, such as GPU heaps.
 - Patrick Walton's Rust port,
   [offset-allocator](https://github.com/pcwalton/offset-allocator), was
   consulted for its tests.
