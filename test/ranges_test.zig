@@ -48,8 +48,9 @@ fn Model(comptime Ranges: type) type {
 
             // No byte in two live ranges. Empty ranges hold no bytes.
             for (self.sizes.items) |other| {
-                const disjoint = size == 0 or other.size == 0 or
-                    handle.offset + size <= other.offset or other.offset + other.size <= handle.offset;
+                const before = handle.offset + size <= other.offset;
+                const after = other.offset + other.size <= handle.offset;
+                const disjoint = size == 0 or other.size == 0 or before or after;
                 try testing.expect(disjoint);
             }
 
@@ -77,7 +78,9 @@ fn Model(comptime Ranges: type) type {
                 used += range.size;
             }
             const report = ranges.storageReport();
-            if (report.total_free_space != 0) try testing.expectEqual(total_bytes - used, report.total_free_space);
+            if (report.total_free_space != 0) {
+                try testing.expectEqual(total_bytes - used, report.total_free_space);
+            }
         }
     };
 }
@@ -99,8 +102,25 @@ fn randomSize(random: std.Random, config: Config) u64 {
 fn run(comptime Ranges: type, seed: u64, config: Config) !void {
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
+    errdefer std.debug.print(
+        "Ranges: seed 0x{x}, unit {d}, total_bytes {d}, max_allocs {d}, max_size {d}, " ++
+            "steps {d}\n",
+        .{
+            seed,
+            config.unit,
+            config.total_bytes,
+            config.max_allocs,
+            config.max_size,
+            config.steps,
+        },
+    );
 
-    var ranges = try Ranges.init(testing.allocator, config.total_bytes, config.max_allocs, config.unit);
+    var ranges = try Ranges.init(
+        testing.allocator,
+        config.total_bytes,
+        config.max_allocs,
+        config.unit,
+    );
     defer ranges.deinit(testing.allocator);
     var model: Model(Ranges) = .{};
     defer model.deinit();
@@ -143,13 +163,31 @@ fn run(comptime Ranges: type, seed: u64, config: Config) !void {
 
 const configs = [_]Config{
     // Vulkan uniform offsets in a 16 MiB buffer.
-    .{ .unit = 256, .total_bytes = 16 << 20, .max_allocs = 4096, .max_size = 1 << 16, .steps = 8000 },
+    .{
+        .unit = 256,
+        .total_bytes = 16 << 20,
+        .max_allocs = 4096,
+        .max_size = 1 << 16,
+        .steps = 8000,
+    },
     // Byte units: the core as it is.
     .{ .unit = 1, .total_bytes = 1 << 20, .max_allocs = 1024, .max_size = 1 << 12, .steps = 6000 },
     // A space that is not a multiple of the unit, nodes running out first.
-    .{ .unit = 64, .total_bytes = (1 << 24) + 100, .max_allocs = 48, .max_size = 1 << 14, .steps = 4000 },
+    .{
+        .unit = 64,
+        .total_bytes = (1 << 24) + 100,
+        .max_allocs = 48,
+        .max_size = 1 << 14,
+        .steps = 4000,
+    },
     // 64 GiB in 4 KiB pages.
-    .{ .unit = 4096, .total_bytes = 64 << 30, .max_allocs = 2048, .max_size = 1 << 30, .steps = 4000 },
+    .{
+        .unit = 4096,
+        .total_bytes = 64 << 30,
+        .max_allocs = 2048,
+        .max_size = 1 << 30,
+        .steps = 4000,
+    },
 };
 
 test "Ranges: aligned, disjoint, rounded up; 32-bit node indices" {
@@ -161,6 +199,39 @@ test "Ranges: aligned, disjoint, rounded up; 32-bit node indices" {
 test "Ranges: aligned, disjoint, rounded up; 16-bit node indices" {
     for ([_]u64{ 1, 2, 3, 0x5eed }) |seed| {
         for (configs) |config| try run(oa.Ranges16, seed, config);
+    }
+}
+
+// Cases per node index width, each with its unit, space, node count and
+// request sizes drawn from its seed, which a failure prints.
+const fuzz_cases = 1000;
+
+test "Ranges: fuzzed units, spaces and node counts, both widths" {
+    for (0..fuzz_cases) |case| {
+        const seed = 0x7a46_0000 + @as(u64, case);
+        var prng: std.Random.DefaultPrng = .init(seed);
+        const random = prng.random();
+        const shift = random.uintAtMost(u5, 31);
+        const unit = @as(u32, 1) << shift;
+        // At most 2^32 - 1 whole units, and a partial one or none.
+        const units: u64 = switch (random.uintLessThan(u32, 4)) {
+            0 => random.uintAtMost(u64, 64),
+            1 => random.intRangeAtMost(u64, 65, 1 << 20),
+            2 => std.math.maxInt(u32),
+            else => random.uintAtMost(u64, std.math.maxInt(u32)),
+        };
+        const total_bytes = (units << shift) + random.uintAtMost(u64, unit - 1);
+        const config: Config = .{
+            .unit = unit,
+            .total_bytes = total_bytes,
+            // 3 to 512 nodes, as many cases below 64 as above. With 2,
+            // none is left after a reset, which `run` does not expect.
+            .max_allocs = random.intRangeAtMost(u32, 3, @as(u32, 4) << random.uintAtMost(u5, 7)),
+            .max_size = random.intRangeAtMost(u64, 1, @max(1, total_bytes)),
+            .steps = random.intRangeAtMost(u32, 20, 200),
+        };
+        try run(oa.Ranges, seed, config);
+        try run(oa.Ranges16, seed, config);
     }
 }
 
@@ -222,13 +293,19 @@ test "Ranges: handles that are not from allocate" {
         const a = try ranges.allocate(256);
 
         // A node past the array.
-        try testing.expectError(error.NodeOutOfRange, ranges.checkHandle(.{ .offset = 0, .node = 64, .generation = 0 }));
+        const past: Ranges.Handle = .{ .offset = 0, .node = 64, .generation = 0 };
+        try testing.expectError(error.NodeOutOfRange, ranges.checkHandle(past));
         // A node that holds the free rest, at its current generation.
         const rest: Ranges.NodeIndex = for (ranges.core.nodes, 0..) |node, i| {
             if (!node.used and node.data_size > 0) break @intCast(i);
         } else unreachable;
-        try testing.expectError(error.NodeNotInUse, ranges.checkHandle(.{ .offset = 256, .node = rest, .generation = ranges.generations[rest] }));
-        try testing.expect(!ranges.isLive(.{ .offset = 256, .node = rest, .generation = ranges.generations[rest] }));
+        const free_rest: Ranges.Handle = .{
+            .offset = 256,
+            .node = rest,
+            .generation = ranges.generations[rest],
+        };
+        try testing.expectError(error.NodeNotInUse, ranges.checkHandle(free_rest));
+        try testing.expect(!ranges.isLive(free_rest));
         ranges.free(a);
     }
 }
@@ -239,7 +316,10 @@ test "Ranges: units, sizes and reports in bytes" {
         var ranges = try Ranges.init(testing.allocator, 1000, 16, 256);
         defer ranges.deinit(testing.allocator);
         try testing.expectEqual(@as(u32, 256), ranges.unitBytes());
-        try testing.expectEqual(Ranges.StorageReport{ .total_free_space = 768, .largest_free_region = 768 }, ranges.storageReport());
+        try testing.expectEqual(
+            Ranges.StorageReport{ .total_free_space = 768, .largest_free_region = 768 },
+            ranges.storageReport(),
+        );
 
         const a = try ranges.allocate(1);
         try testing.expectEqual(@as(u64, 0), a.offset);
@@ -248,7 +328,10 @@ test "Ranges: units, sizes and reports in bytes" {
         try testing.expectEqual(@as(u64, 256), b.offset);
         try testing.expectEqual(@as(u64, 512), ranges.sizeOf(b));
         try testing.expectError(error.NoSpace, ranges.allocate(1));
-        try testing.expectEqual(Ranges.StorageReport{ .total_free_space = 0, .largest_free_region = 0 }, ranges.storageReport());
+        try testing.expectEqual(
+            Ranges.StorageReport{ .total_free_space = 0, .largest_free_region = 0 },
+            ranges.storageReport(),
+        );
 
         // Zero bytes, as in the core: no bytes, a node, and the offset of
         // the next range.
@@ -309,6 +392,21 @@ test "Ranges: past 4 GiB with a large unit" {
     }
 }
 
+test "Ranges: free reads only the handle's node and generation" {
+    inline for (.{ oa.Ranges, oa.Ranges16 }) |Ranges| {
+        var ranges = try Ranges.init(testing.allocator, 1 << 20, 64, 256);
+        defer ranges.deinit(testing.allocator);
+        const a = try ranges.allocate(1000);
+        // An offset that is not the range's, past what 32 bits of units
+        // hold: the core never reads it.
+        var changed = a;
+        changed.offset = 1 << 63;
+        ranges.free(changed);
+        try testing.expect(!ranges.isLive(a));
+        try testing.expectEqual(@as(u64, 1 << 20), ranges.storageReport().total_free_space);
+    }
+}
+
 test "Ranges: requests too large for the core" {
     // The most units the core manages: 2^32 - 1 in 256-byte units.
     const total: u64 = (1 << 32) * 256 - 256;
@@ -328,7 +426,11 @@ test "Ranges: requests too large for the core" {
 test "Ranges: init out of memory frees what it took" {
     // The core takes two allocations, the generations a third.
     for (0..3) |fail_index| {
-        var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = fail_index });
-        try testing.expectError(error.OutOfMemory, oa.Ranges.init(failing.allocator(), 1 << 20, 16, 256));
+        var failing: std.testing.FailingAllocator = .init(
+            testing.allocator,
+            .{ .fail_index = fail_index },
+        );
+        const failed = oa.Ranges.init(failing.allocator(), 1 << 20, 16, 256);
+        try testing.expectError(error.OutOfMemory, failed);
     }
 }

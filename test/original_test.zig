@@ -176,7 +176,8 @@ fn Suite(comptime Allocator: type) type {
             try testing.expectEqual(@as(u32, 0), report.largest_free_region);
 
             // Four scattered slots, then four contiguous ones (which merge).
-            for ([_]usize{ 243, 5, 123, 95, 151, 152, 153, 154 }) |i| allocator.free(allocations[i]);
+            const order = [_]usize{ 243, 5, 123, 95, 151, 152, 153, 154 };
+            for (order) |i| allocator.free(allocations[i]);
 
             allocations[243] = try allocator.allocate(1024 * 1024);
             allocations[5] = try allocator.allocate(1024 * 1024);

@@ -134,6 +134,8 @@ fn findLowestSetBitAfter(bit_mask: u32, start_bit_index: u5) ?u5 {
 }
 
 /// The allocator, with node indices of type `NodeIndex` (`u32` or `u16`).
+/// It owns its node arrays, so a copy of it shares them: once copied, only
+/// the copy may be used, as only the target of a C++ move may.
 pub fn AllocatorOf(comptime NodeIndex: type) type {
     comptime assert(NodeIndex == u32 or NodeIndex == u16);
 
@@ -158,6 +160,11 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
 
         const unused: NodeIndex = std.math.maxInt(NodeIndex);
 
+        /// A range from `allocate`, valid until it is freed or the allocator
+        /// is reset. The core does not check that, as the original does
+        /// not: a stale one given to `free` or `allocationSize` reads
+        /// whichever node took its index. `Ranges` stamps a generation into
+        /// its handles and checks it.
         pub const Allocation = struct {
             offset: u32,
             /// Internal: the node index, which `free` and `allocationSize`
@@ -256,13 +263,15 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             // If the top bin has free regions, scan its leaf bins. This can
             // find none.
             if (self.used_bins_top & (@as(u32, 1) << top_bin_index) != 0) {
-                leaf_bin_index = findLowestSetBitAfter(self.used_bins[top_bin_index], min_leaf_bin_index);
+                const leaf_bins = self.used_bins[top_bin_index];
+                leaf_bin_index = findLowestSetBitAfter(leaf_bins, min_leaf_bin_index);
             }
 
             // If not, search the top bins from the next one up. (The
             // largest top bin is 30, so this never passes 31.)
             if (leaf_bin_index == null) {
-                top_bin_index = findLowestSetBitAfter(self.used_bins_top, min_top_bin_index + 1) orelse
+                const above = min_top_bin_index + 1;
+                top_bin_index = findLowestSetBitAfter(self.used_bins_top, above) orelse
                     return error.NoSpace;
 
                 // Every leaf bin here fits, since the top bin was rounded
@@ -297,11 +306,16 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             if (remainder_size > 0) {
                 // `node` stays valid: insertNodeIntoBin writes other nodes
                 // but never moves the array.
-                const new_node_index = self.insertNodeIntoBin(remainder_size, node.data_offset + size);
+                const new_node_index = self.insertNodeIntoBin(
+                    remainder_size,
+                    node.data_offset + size,
+                );
 
                 // Link the neighbours so that free can merge them, and
                 // point the old next neighbour at the new middle node.
-                if (node.neighbor_next != unused) self.nodes[node.neighbor_next].neighbor_prev = @intCast(new_node_index);
+                if (node.neighbor_next != unused) {
+                    self.nodes[node.neighbor_next].neighbor_prev = @intCast(new_node_index);
+                }
                 self.nodes[new_node_index].neighbor_prev = @intCast(node_index);
                 self.nodes[new_node_index].neighbor_next = node.neighbor_next;
                 node.neighbor_next = @intCast(new_node_index);
@@ -391,8 +405,14 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             const top_node_index = self.bin_indices[bin_index];
             const node_index: u32 = self.free_nodes[self.free_offset];
             self.free_offset -= 1;
-            self.nodes[node_index] = .{ .data_offset = data_offset, .data_size = size, .bin_list_next = top_node_index };
-            if (top_node_index != unused) self.nodes[top_node_index].bin_list_prev = @intCast(node_index);
+            self.nodes[node_index] = .{
+                .data_offset = data_offset,
+                .data_size = size,
+                .bin_list_next = top_node_index,
+            };
+            if (top_node_index != unused) {
+                self.nodes[top_node_index].bin_list_prev = @intCast(node_index);
+            }
             self.bin_indices[bin_index] = @intCast(node_index);
 
             self.free_storage += size;
@@ -406,7 +426,9 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             if (node.bin_list_prev != unused) {
                 // Easy case: unlink from the middle of the list.
                 self.nodes[node.bin_list_prev].bin_list_next = node.bin_list_next;
-                if (node.bin_list_next != unused) self.nodes[node.bin_list_next].bin_list_prev = node.bin_list_prev;
+                if (node.bin_list_next != unused) {
+                    self.nodes[node.bin_list_next].bin_list_prev = node.bin_list_prev;
+                }
             } else {
                 // The node is first in its bin: find the bin.
                 const bin_index = small_float.uintToFloatRoundDown(node.data_size);
@@ -415,7 +437,9 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
                 const leaf_bin_index: u3 = @intCast(bin_index & leaf_bins_index_mask);
 
                 self.bin_indices[bin_index] = node.bin_list_next;
-                if (node.bin_list_next != unused) self.nodes[node.bin_list_next].bin_list_prev = unused;
+                if (node.bin_list_next != unused) {
+                    self.nodes[node.bin_list_next].bin_list_prev = unused;
+                }
 
                 // Bin empty?
                 if (self.bin_indices[bin_index] == unused) {
@@ -454,12 +478,16 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
                 if (self.used_bins_top != 0) {
                     const top_bin_index: u32 = 31 - @clz(self.used_bins_top);
                     const leaf_bin_index: u32 = 7 - @clz(self.used_bins[top_bin_index]);
-                    largest_free_region = small_float.floatToUint((top_bin_index << top_bins_index_shift) | leaf_bin_index);
+                    const bin_index = (top_bin_index << top_bins_index_shift) | leaf_bin_index;
+                    largest_free_region = small_float.floatToUint(bin_index);
                     assert(free_storage >= largest_free_region);
                 }
             }
 
-            return .{ .total_free_space = free_storage, .largest_free_region = largest_free_region };
+            return .{
+                .total_free_space = free_storage,
+                .largest_free_region = largest_free_region,
+            };
         }
 
         /// The number of free regions in each bin, with the bin's size.

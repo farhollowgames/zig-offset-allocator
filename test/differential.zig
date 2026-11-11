@@ -3,18 +3,22 @@
 //! every result must be identical (offsets, node indices, failures,
 //! allocation sizes, both storage reports), and so must every field of
 //! their state after every call: the bin tables and masks, the freelist and
-//! every node.
+//! every node. The reference keeps the original's asserts on. A failure
+//! prints the seed and the configuration of its run.
 
 const std = @import("std");
 const testing = std.testing;
 const oa = @import("offset_allocator");
 const small_float = oa.small_float;
 
+/// An allocator of the original, behind the shim's C ABI.
+const Cxx = opaque {};
+
 /// The shim's C ABI for one build of the original: `oa32_` for 32-bit node
 /// indices, `oa16_` for 16-bit.
 fn Reference(comptime prefix: []const u8) type {
     return struct {
-        const Handle = *anyopaque;
+        const Handle = *Cxx;
 
         fn ext(comptime name: []const u8, comptime T: type) *const T {
             return @extern(*const T, .{ .name = prefix ++ name });
@@ -33,8 +37,14 @@ fn Reference(comptime prefix: []const u8) type {
         const free = ext("free", fn (Handle, u32, u32) callconv(.c) void);
         const allocation_size = ext("allocation_size", fn (Handle, u32, u32) callconv(.c) u32);
         const storage_report = ext("storage_report", fn (Handle, *[2]u32) callconv(.c) void);
-        const storage_report_full = ext("storage_report_full", fn (Handle, *[2 * oa.num_leaf_bins]u32) callconv(.c) void);
-        const state = ext("state", fn (Handle, *[5]u32, *[oa.num_top_bins]u8, *[oa.num_leaf_bins]u32) callconv(.c) void);
+        const storage_report_full = ext(
+            "storage_report_full",
+            fn (Handle, *[2 * oa.num_leaf_bins]u32) callconv(.c) void,
+        );
+        const state = ext(
+            "state",
+            fn (Handle, *[5]u32, *[oa.num_top_bins]u8, *[oa.num_leaf_bins]u32) callconv(.c) void,
+        );
         const node = ext("node", fn (Handle, u32, *[7]u32) callconv(.c) void);
         const free_node = ext("free_node", fn (Handle, u32) callconv(.c) u32);
     };
@@ -58,7 +68,8 @@ test "SmallFloat: uintToFloatRoundUp and uintToFloatRoundDown, every u32" {
     var mismatches: [threads]u64 = @splat(0);
     var handles: [threads]std.Thread = undefined;
     for (&handles, 0..) |*h, t| {
-        h.* = try std.Thread.spawn(.{}, sweep, .{ @as(u64, t) * per_thread, per_thread, &mismatches[t] });
+        const start = @as(u64, t) * per_thread;
+        h.* = try std.Thread.spawn(.{}, sweep, .{ start, per_thread, &mismatches[t] });
     }
     for (handles) |h| h.join();
     for (mismatches) |m| try testing.expectEqual(@as(u64, 0), m);
@@ -127,7 +138,8 @@ fn Pair(comptime Allocator: type, comptime Ref: type) type {
             if (result) |a| {
                 try self.expectEq(offset, a.offset);
                 try self.expectEq(metadata, a.metadata);
-                try self.expectEq(Ref.allocation_size(self.ref, offset, metadata), self.zig.allocationSize(a));
+                const ref_size = Ref.allocation_size(self.ref, offset, metadata);
+                try self.expectEq(ref_size, self.zig.allocationSize(a));
                 try self.live.append(testing.allocator, a);
                 return true;
             } else |err| {
@@ -197,7 +209,8 @@ fn Pair(comptime Allocator: type, comptime Ref: type) type {
 
             if (!check_nodes) return;
             for (self.live.items) |a| {
-                try self.expectEq(Ref.allocation_size(self.ref, a.offset, a.metadata), z.allocationSize(a));
+                const size = Ref.allocation_size(self.ref, a.offset, a.metadata);
+                try self.expectEq(size, z.allocationSize(a));
             }
             for (z.nodes, z.free_nodes, 0..) |n, free_node, i| {
                 var r: [7]u32 = undefined;
@@ -215,7 +228,10 @@ fn Pair(comptime Allocator: type, comptime Ref: type) type {
 
         fn expectEq(self: *const Self, expected: u32, actual: u32) !void {
             if (expected != actual) {
-                std.debug.print("after call {d}: reference {d}, port {d}\n", .{ self.calls, expected, actual });
+                std.debug.print(
+                    "after call {d}: reference {d}, port {d}\n",
+                    .{ self.calls, expected, actual },
+                );
                 return error.TestExpectedEqual;
             }
         }
@@ -256,6 +272,10 @@ fn randomSize(random: std.Random, config: Config) u32 {
 fn run(comptime Allocator: type, comptime Ref: type, seed: u64, config: Config) !void {
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
+    errdefer std.debug.print(
+        "differential: seed {d}, total {d}, max_allocs {d}, max_size {d}, steps {d}\n",
+        .{ seed, config.total, config.max_allocs, config.max_size, config.steps },
+    );
 
     var pair = try Pair(Allocator, Ref).init(config.total, config.max_allocs);
     defer pair.deinit();
@@ -302,15 +322,33 @@ fn run(comptime Allocator: type, comptime Ref: type, seed: u64, config: Config) 
 
 const configs = [_]Config{
     // Space runs out first.
-    .{ .total = 1 << 20, .max_allocs = 4096, .max_size = 1 << 16, .steps = 20000, .node_check_every = 16 },
+    .{
+        .total = 1 << 20,
+        .max_allocs = 4096,
+        .max_size = 1 << 16,
+        .steps = 20000,
+        .node_check_every = 16,
+    },
     // Nodes run out first.
     .{ .total = 1 << 30, .max_allocs = 48, .max_size = 1 << 12, .steps = 20000 },
     // The whole u32 range, large sizes in the top bins.
-    .{ .total = 0xffff_ffff, .max_allocs = 1024, .max_size = 0xffff_ffff, .steps = 20000, .node_check_every = 4 },
+    .{
+        .total = 0xffff_ffff,
+        .max_allocs = 1024,
+        .max_size = 0xffff_ffff,
+        .steps = 20000,
+        .node_check_every = 4,
+    },
     // A tiny space: denorm bins only.
     .{ .total = 100, .max_allocs = 256, .max_size = 12, .steps = 20000 },
     // A space that is not a bin size, mid-range sizes.
-    .{ .total = 1_000_003, .max_allocs = 512, .max_size = 100_000, .steps = 20000, .node_check_every = 4 },
+    .{
+        .total = 1_000_003,
+        .max_allocs = 512,
+        .max_size = 100_000,
+        .steps = 20000,
+        .node_check_every = 4,
+    },
     // The fewest nodes the original works with.
     .{ .total = 1000, .max_allocs = 2, .max_size = 1000, .steps = 2000 },
     // An empty space.
@@ -324,7 +362,13 @@ test "allocator: random sequences, 32-bit node indices" {
         for (configs) |config| try run(oa.Allocator, Ref32, seed, config);
     }
     // The original's default node count, 128 * 1024.
-    try run(oa.Allocator, Ref32, 9, .{ .total = 1 << 28, .max_allocs = oa.default_max_allocs, .max_size = 1 << 12, .steps = 200_000, .node_check_every = 50_000 });
+    try run(oa.Allocator, Ref32, 9, .{
+        .total = 1 << 28,
+        .max_allocs = oa.default_max_allocs,
+        .max_size = 1 << 12,
+        .steps = 200_000,
+        .node_check_every = 50_000,
+    });
 }
 
 test "allocator: random sequences, 16-bit node indices" {
@@ -332,8 +376,116 @@ test "allocator: random sequences, 16-bit node indices" {
         for (configs) |config| try run(oa.Allocator16, Ref16, seed, config);
     }
     // All 65536 nodes, the most 16-bit indices address.
-    try run(oa.Allocator16, Ref16, 9, .{ .total = 1 << 24, .max_allocs = 65536, .max_size = 64, .steps = 200_000, .node_check_every = 50_000 });
+    try run(oa.Allocator16, Ref16, 9, .{
+        .total = 1 << 24,
+        .max_allocs = 65536,
+        .max_size = 64,
+        .steps = 200_000,
+        .node_check_every = 50_000,
+    });
 }
+
+// Fuzzing ------------------------------------------------------------------
+
+/// Cases per node index width. Each draws its space, its node count, its
+/// requests and its calls from its seed, which a failure prints.
+const fuzz_cases = 1000;
+
+test "allocator: fuzzed spaces, node counts and calls, both widths" {
+    for (0..fuzz_cases) |case| {
+        const seed = 0xf022_0000 + @as(u64, case);
+        try fuzz(oa.Allocator, Ref32, seed);
+        try fuzz(oa.Allocator16, Ref16, seed);
+    }
+}
+
+fn fuzz(comptime Allocator: type, comptime Ref: type, seed: u64) !void {
+    var prng: std.Random.DefaultPrng = .init(seed);
+    const random = prng.random();
+    const total = fuzzTotal(random);
+    // 2 to 4096 nodes, as many cases below 64 as above.
+    const max_allocs = random.intRangeAtMost(u32, 2, @as(u32, 4) << random.uintAtMost(u5, 10));
+    const steps = random.intRangeAtMost(u32, 50, 400);
+    errdefer std.debug.print(
+        "differential fuzz: seed 0x{x}, total {d}, max_allocs {d}, steps {d}\n",
+        .{ seed, total, max_allocs, steps },
+    );
+
+    var pair = try Pair(Allocator, Ref).init(total, max_allocs);
+    defer pair.deinit();
+    try pair.expectSame(true);
+
+    // Every node after every call, unless there are many; after a reset or
+    // a move always.
+    const node_check_every: u32 = if (max_allocs <= 512) 1 else 8;
+    for (0..steps) |_| {
+        const roll = random.uintLessThan(u32, 200);
+        if (roll == 0) {
+            pair.reset();
+        } else if (roll == 1) {
+            try pair.move();
+        } else if (roll < 90 and pair.live.items.len > 0) {
+            pair.free(random.uintLessThan(usize, pair.live.items.len));
+        } else {
+            const largest = pair.zig.storageReport().largest_free_region;
+            _ = try pair.allocate(fuzzSize(random, total, largest));
+        }
+        try pair.expectSame(roll <= 1 or pair.calls % node_check_every == 0);
+    }
+
+    // Everything freed in random order: one free region again.
+    while (pair.live.items.len > 0) {
+        pair.free(random.uintLessThan(usize, pair.live.items.len));
+        try pair.expectSame(pair.calls % node_check_every == 0);
+    }
+    try pair.expectSame(true);
+    var regions: u32 = 0;
+    for (pair.zig.storageReportFull().free_regions) |region| regions += region.count;
+    try testing.expectEqual(@as(u32, 1), regions);
+}
+
+/// A space size: empty or in the denorm bins, a bin's size or one off it,
+/// the largest, or any.
+fn fuzzTotal(random: std.Random) u32 {
+    return switch (random.uintLessThan(u32, 8)) {
+        0 => random.uintAtMost(u32, 16),
+        1 => offByOne(random, small_float.floatToUint(random.uintAtMost(u32, 239))),
+        2 => 0xffff_ffff - random.uintAtMost(u32, 2),
+        3 => random.intRangeAtMost(u32, 17, 1 << 12),
+        4 => random.intRangeAtMost(u32, 1 << 12, 1 << 20),
+        else => random.int(u32),
+    };
+}
+
+/// A request: zero, the denorm sizes, the largest free region's bin size
+/// (which always fits while a node is left) or one off it, the space or one
+/// off it, past the last bin's size, a bin's size or one off it, a small
+/// share of the space, or any size up to the space.
+fn fuzzSize(random: std.Random, total: u32, largest_free_region: u32) u32 {
+    return switch (random.uintLessThan(u32, 16)) {
+        0 => 0,
+        1, 2 => random.intRangeAtMost(u32, 1, 16),
+        3, 4 => offByOne(random, largest_free_region),
+        5 => offByOne(random, total),
+        // Above bin 239's size (0xf000_0000): rounds up to bin 240, which
+        // never holds a region.
+        6 => random.intRangeAtMost(u32, 0xf000_0000, 0xffff_ffff),
+        7, 8 => offByOne(random, small_float.floatToUint(random.uintAtMost(u32, 239))),
+        9, 10, 11 => random.uintAtMost(u32, total / 64),
+        else => random.uintAtMost(u32, total),
+    };
+}
+
+/// `value`, or one more or one less, saturating.
+fn offByOne(random: std.Random, value: u32) u32 {
+    return switch (random.uintLessThan(u32, 3)) {
+        0 => value,
+        1 => value +| 1,
+        else => value -| 1,
+    };
+}
+
+// Fixed cases ---------------------------------------------------------------
 
 test "allocator: the default node count" {
     // The C++ default argument against default_max_allocs.
@@ -352,7 +504,8 @@ test "allocator: allocationSize of a failed allocation" {
         var pair = try Pair(oa.Allocator, Ref32).init(10, 16);
         defer pair.deinit();
         try testing.expect(!try pair.allocate(11));
-        try testing.expectEqual(Ref32.allocation_size(pair.ref, oa.no_space, oa.no_space), pair.zig.allocationSize(oa.Allocator.Allocation.none));
+        const size = Ref32.allocation_size(pair.ref, oa.no_space, oa.no_space);
+        try testing.expectEqual(size, pair.zig.allocationSize(.none));
     }
     // 16-bit: the original compares the 16-bit metadata with the 32-bit
     // NO_SPACE, never equal, and reads node 65535. With 65536 nodes that
@@ -362,6 +515,7 @@ test "allocator: allocationSize of a failed allocation" {
         var pair = try Pair(oa.Allocator16, Ref16).init(10, 65536);
         defer pair.deinit();
         try testing.expect(!try pair.allocate(11));
-        try testing.expectEqual(Ref16.allocation_size(pair.ref, oa.no_space, 0xffff), pair.zig.allocationSize(oa.Allocator16.Allocation.none));
+        const size = Ref16.allocation_size(pair.ref, oa.no_space, 0xffff);
+        try testing.expectEqual(size, pair.zig.allocationSize(.none));
     }
 }

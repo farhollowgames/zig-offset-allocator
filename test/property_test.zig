@@ -35,7 +35,13 @@ fn Model(comptime Allocator: type) type {
         const Self = @This();
 
         fn init(gpa: std.mem.Allocator, total: u32, max_allocs: u32) !Self {
-            var self: Self = .{ .gpa = gpa, .total = total, .max_allocs = max_allocs, .segments = .empty, .live = .empty };
+            var self: Self = .{
+                .gpa = gpa,
+                .total = total,
+                .max_allocs = max_allocs,
+                .segments = .empty,
+                .live = .empty,
+            };
             try self.segments.append(gpa, .{ .offset = 0, .size = total, .live = false });
             return self;
         }
@@ -78,7 +84,11 @@ fn Model(comptime Allocator: type) type {
 
             self.segments.items[i] = .{ .offset = s.offset, .size = size, .live = true };
             if (s.size > size) {
-                try self.segments.insert(self.gpa, i + 1, .{ .offset = s.offset + size, .size = s.size - size, .live = false });
+                try self.segments.insert(self.gpa, i + 1, .{
+                    .offset = s.offset + size,
+                    .size = s.size - size,
+                    .live = false,
+                });
             }
             try self.live.append(self.gpa, a);
             return true;
@@ -149,7 +159,9 @@ fn Model(comptime Allocator: type) type {
             const all = try allocator.allocate(largest);
             try testing.expectEqual(@as(u32, 0), all.offset);
             allocator.free(all);
-            if (largest < self.total) try testing.expectError(error.NoSpace, allocator.allocate(largest + 1));
+            if (largest < self.total) {
+                try testing.expectError(error.NoSpace, allocator.allocate(largest + 1));
+            }
         }
     };
 }
@@ -169,6 +181,10 @@ fn randomSize(random: std.Random, max_size: u32) u32 {
 fn run(comptime Allocator: type, seed: u64, config: Config) !void {
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
+    errdefer std.debug.print(
+        "properties: seed 0x{x}, total {d}, max_allocs {d}, max_size {d}, steps {d}\n",
+        .{ seed, config.total, config.max_allocs, config.max_size, config.steps },
+    );
 
     var allocator = try Allocator.init(testing.allocator, config.total, config.max_allocs);
     defer allocator.deinit(testing.allocator);
@@ -192,7 +208,8 @@ fn run(comptime Allocator: type, seed: u64, config: Config) !void {
     // Fill to exhaustion, then free everything.
     var failures: u32 = 0;
     while (failures < 64) {
-        if (!try model.expectAllocate(&allocator, randomSize(random, config.max_size))) failures += 1;
+        const size = randomSize(random, config.max_size);
+        if (!try model.expectAllocate(&allocator, size)) failures += 1;
         try model.expectReports(&allocator);
     }
     try model.freeAll(&allocator, random);
@@ -220,7 +237,41 @@ test "properties: 16-bit node indices" {
         for (configs) |config| try run(oa.Allocator16, seed, config);
     }
     // All 65536 nodes, the most 16-bit indices address.
-    try run(oa.Allocator16, 7, .{ .total = 1 << 24, .max_allocs = 65536, .max_size = 64, .steps = 3000 });
+    try run(oa.Allocator16, 7, .{
+        .total = 1 << 24,
+        .max_allocs = 65536,
+        .max_size = 64,
+        .steps = 3000,
+    });
+}
+
+// Cases per node index width, each with its space, node count and request
+// sizes drawn from its seed, which a failure prints.
+const fuzz_cases = 1000;
+
+test "properties: fuzzed spaces and node counts, both widths" {
+    for (0..fuzz_cases) |case| {
+        const seed = 0x9e37_0000 + @as(u64, case);
+        var prng: std.Random.DefaultPrng = .init(seed);
+        const random = prng.random();
+        const total = switch (random.uintLessThan(u32, 4)) {
+            0 => random.intRangeAtMost(u32, 1, 64),
+            1 => random.intRangeAtMost(u32, 65, 1 << 20),
+            2 => 0xffff_ffff - random.uintAtMost(u32, 2),
+            else => random.intRangeAtMost(u32, 1, std.math.maxInt(u32)),
+        };
+        const config: Config = .{
+            .total = total,
+            // 3 to 1024 nodes, as many cases below 64 as above. With 2,
+            // none is left once the space is one region, and `run` ends by
+            // allocating the whole space.
+            .max_allocs = random.intRangeAtMost(u32, 3, @as(u32, 4) << random.uintAtMost(u5, 8)),
+            .max_size = random.intRangeAtMost(u32, 1, total),
+            .steps = random.intRangeAtMost(u32, 20, 200),
+        };
+        try run(oa.Allocator, seed, config);
+        try run(oa.Allocator16, seed, config);
+    }
 }
 
 test "NO_SPACE: out of nodes" {
@@ -234,13 +285,19 @@ test "NO_SPACE: out of nodes" {
         try testing.expectError(error.NoSpace, allocator.allocate(10));
         // Out of nodes: the report shows no free space although 980 units
         // are free.
-        try testing.expectEqual(oa.StorageReport{ .total_free_space = 0, .largest_free_region = 0 }, allocator.storageReport());
+        try testing.expectEqual(
+            oa.StorageReport{ .total_free_space = 0, .largest_free_region = 0 },
+            allocator.storageReport(),
+        );
         allocator.free(b);
         const c = try allocator.allocate(10);
         try testing.expectEqual(b.offset, c.offset);
         allocator.free(a);
         allocator.free(c);
-        try testing.expectEqual(oa.StorageReport{ .total_free_space = 1000, .largest_free_region = 960 }, allocator.storageReport());
+        try testing.expectEqual(
+            oa.StorageReport{ .total_free_space = 1000, .largest_free_region = 960 },
+            allocator.storageReport(),
+        );
     }
 }
 
@@ -257,7 +314,10 @@ test "NO_SPACE: a free region too small for the request's bin" {
         const b = try allocator.allocate(1);
         try testing.expectEqual(@as(u32, 16), b.offset);
         try testing.expectError(error.NoSpace, allocator.allocate(0));
-        try testing.expectEqual(oa.StorageReport{ .total_free_space = 0, .largest_free_region = 0 }, allocator.storageReport());
+        try testing.expectEqual(
+            oa.StorageReport{ .total_free_space = 0, .largest_free_region = 0 },
+            allocator.storageReport(),
+        );
     }
 }
 
@@ -275,7 +335,10 @@ test "allocationSize, Allocation.none and reset" {
         try testing.expectEqual(@as(u32, 777), z.offset);
 
         allocator.reset();
-        try testing.expectEqual(oa.StorageReport{ .total_free_space = 1 << 20, .largest_free_region = 1 << 20 }, allocator.storageReport());
+        try testing.expectEqual(
+            oa.StorageReport{ .total_free_space = 1 << 20, .largest_free_region = 1 << 20 },
+            allocator.storageReport(),
+        );
         const all = try allocator.allocate(1 << 20);
         try testing.expectEqual(@as(u32, 0), all.offset);
         try testing.expectEqual(a.metadata, all.metadata);
@@ -285,7 +348,8 @@ test "allocationSize, Allocation.none and reset" {
 test "init: out of memory frees what it took" {
     var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 1 });
     try testing.expectError(error.OutOfMemory, oa.Allocator.init(failing.allocator(), 100, 16));
-    try testing.expectError(error.OutOfMemory, oa.Allocator.init(testing.failing_allocator, 100, 16));
+    const failed = oa.Allocator.init(testing.failing_allocator, 100, 16);
+    try testing.expectError(error.OutOfMemory, failed);
 }
 
 test "SmallFloat: rounding brackets every value and bins are monotonic" {

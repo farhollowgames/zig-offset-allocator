@@ -80,6 +80,9 @@ pub fn RangesOf(comptime Core: type) type {
         /// The core's `StorageReportFull` with bin sizes in bytes.
         pub const StorageReportFull = StorageReportFullBytes;
 
+        /// A range from `allocate`. `free` and `reset` make it stale, which
+        /// the generation it carries shows: `free` panics on a stale handle
+        /// in safe builds, and `isLive` says so in every mode.
         pub const Handle = struct {
             /// The range's first byte, a multiple of the unit.
             offset: u64,
@@ -93,7 +96,12 @@ pub fn RangesOf(comptime Core: type) type {
         /// of two. The core manages `size_bytes / unit` units, which must
         /// fit in u32; a trailing partial unit is never handed out.
         /// `max_allocs` is the core's node count (see `Allocator.init`).
-        pub fn init(gpa: std.mem.Allocator, size_bytes: u64, max_allocs: u32, unit: u32) error{OutOfMemory}!Self {
+        pub fn init(
+            gpa: std.mem.Allocator,
+            size_bytes: u64,
+            max_allocs: u32,
+            unit: u32,
+        ) error{OutOfMemory}!Self {
             assert(std.math.isPowerOfTwo(unit));
             const shift: u5 = @intCast(@ctz(unit));
             assert(size_bytes >> shift <= std.math.maxInt(u32));
@@ -134,7 +142,8 @@ pub fn RangesOf(comptime Core: type) type {
         /// offset of a neighbouring range.
         pub fn allocate(self: *Self, size_bytes: u64) error{NoSpace}!Handle {
             // Rounded up without overflow for any u64.
-            const units = (size_bytes >> self.shift) + @intFromBool(size_bytes & (self.unitBytes() - 1) != 0);
+            const partial = size_bytes & (self.unitBytes() - 1) != 0;
+            const units = (size_bytes >> self.shift) + @intFromBool(partial);
             if (units > std.math.maxInt(u32)) return error.NoSpace;
 
             const allocation = try self.core.allocate(@intCast(units));
@@ -152,13 +161,18 @@ pub fn RangesOf(comptime Core: type) type {
         pub fn free(self: *Self, handle: Handle) void {
             if (std.debug.runtime_safety) {
                 self.checkHandle(handle) catch |err| std.debug.panic(
-                    "offset_allocator: free of a handle that is not live ({t}): node {d}, generation {d}, offset {d}",
+                    "offset_allocator: free of a handle that is not live ({t}): " ++
+                        "node {d}, generation {d}, offset {d}",
                     .{ err, handle.node, handle.generation, handle.offset },
                 );
             }
 
             self.generations[handle.node] +%= 1;
-            self.core.free(.{ .offset = @intCast(handle.offset >> self.shift), .metadata = handle.node });
+            // The core's free reads only the node index.
+            self.core.free(.{
+                .offset = @truncate(handle.offset >> self.shift),
+                .metadata = handle.node,
+            });
         }
 
         /// Whether `handle` can be freed: its node is this allocator's, in
@@ -203,7 +217,10 @@ pub fn RangesOf(comptime Core: type) type {
             const report = self.core.storageReportFull();
             var result: StorageReportFull = undefined;
             for (&result.free_regions, report.free_regions) |*region, core_region| {
-                region.* = .{ .size = @as(u64, core_region.size) << self.shift, .count = core_region.count };
+                region.* = .{
+                    .size = @as(u64, core_region.size) << self.shift,
+                    .count = core_region.count,
+                };
             }
             return result;
         }
