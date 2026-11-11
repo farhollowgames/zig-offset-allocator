@@ -8,12 +8,15 @@
 //!
 //! Zig 0.17 has no way to catch a panic inside a test, so the panic in
 //! `free` is tested in two parts: here through `checkHandle` and `isLive`,
-//! the check `free` runs before it panics, and in test/ranges_panic.zig, a
+//! the check `free` runs before it panics, and in test/panic.zig, a
 //! program `zig build test` runs and expects to abort with the message.
 
 const std = @import("std");
 const testing = std.testing;
 const oa = @import("offset_allocator");
+
+/// `-Dfuzz-seed=N`, XORed into every recorded seed; 0 keeps them.
+const fuzz_seed: u64 = @import("build_options").fuzz_seed;
 
 const Range = struct { offset: u64, size: u64 };
 
@@ -99,14 +102,17 @@ fn randomSize(random: std.Random, config: Config) u64 {
     };
 }
 
-fn run(comptime Ranges: type, seed: u64, config: Config) !void {
+fn run(comptime Ranges: type, recorded: u64, config: Config) !void {
+    const seed = recorded ^ fuzz_seed;
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
     errdefer std.debug.print(
-        "Ranges: seed 0x{x}, unit {d}, total_bytes {d}, max_allocs {d}, max_size {d}, " ++
-            "steps {d}\n",
+        "Ranges: seed 0x{x} (recorded 0x{x}, -Dfuzz-seed={d}), unit {d}, total_bytes {d}, " ++
+            "max_allocs {d}, max_size {d}, steps {d}\n",
         .{
             seed,
+            recorded,
+            fuzz_seed,
             config.unit,
             config.total_bytes,
             config.max_allocs,
@@ -209,7 +215,7 @@ const fuzz_cases = 1000;
 test "Ranges: fuzzed units, spaces and node counts, both widths" {
     for (0..fuzz_cases) |case| {
         const seed = 0x7a46_0000 + @as(u64, case);
-        var prng: std.Random.DefaultPrng = .init(seed);
+        var prng: std.Random.DefaultPrng = .init(seed ^ fuzz_seed);
         const random = prng.random();
         const shift = random.uintAtMost(u5, 31);
         const unit = @as(u32, 1) << shift;

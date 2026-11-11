@@ -20,6 +20,9 @@
 const std = @import("std");
 const testing = std.testing;
 const oa = @import("offset_allocator");
+
+/// `-Dfuzz-seed=N`, XORed into every recorded seed; 0 keeps them.
+const fuzz_seed: u64 = @import("build_options").fuzz_seed;
 const small_float = oa.small_float;
 
 const Segment = struct { offset: u32, size: u32, live: bool };
@@ -178,12 +181,22 @@ fn randomSize(random: std.Random, max_size: u32) u32 {
     };
 }
 
-fn run(comptime Allocator: type, seed: u64, config: Config) !void {
+fn run(comptime Allocator: type, recorded: u64, config: Config) !void {
+    const seed = recorded ^ fuzz_seed;
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
     errdefer std.debug.print(
-        "properties: seed 0x{x}, total {d}, max_allocs {d}, max_size {d}, steps {d}\n",
-        .{ seed, config.total, config.max_allocs, config.max_size, config.steps },
+        "properties: seed 0x{x} (recorded 0x{x}, -Dfuzz-seed={d}), total {d}, " ++
+            "max_allocs {d}, max_size {d}, steps {d}\n",
+        .{
+            seed,
+            recorded,
+            fuzz_seed,
+            config.total,
+            config.max_allocs,
+            config.max_size,
+            config.steps,
+        },
     );
 
     var allocator = try Allocator.init(testing.allocator, config.total, config.max_allocs);
@@ -252,7 +265,7 @@ const fuzz_cases = 1000;
 test "properties: fuzzed spaces and node counts, both widths" {
     for (0..fuzz_cases) |case| {
         const seed = 0x9e37_0000 + @as(u64, case);
-        var prng: std.Random.DefaultPrng = .init(seed);
+        var prng: std.Random.DefaultPrng = .init(seed ^ fuzz_seed);
         const random = prng.random();
         const total = switch (random.uintLessThan(u32, 4)) {
             0 => random.intRangeAtMost(u32, 1, 64),

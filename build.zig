@@ -35,6 +35,14 @@ pub fn build(b: *std.Build) void {
         "test-filter",
         "Skip tests that do not match any filter",
     ) orelse &.{};
+    const fuzz_seed = b.option(
+        u64,
+        "fuzz-seed",
+        "XOR N into every recorded test seed, to explore other inputs (default 0)",
+    ) orelse 0;
+    const test_options = b.addOptions();
+    test_options.addOption(u64, "fuzz_seed", fuzz_seed);
+    const test_options_mod = test_options.createModule();
 
     const test_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
@@ -50,7 +58,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("test/unit.zig"),
             .target = target,
             .optimize = test_optimize,
-            .imports = &.{.{ .name = "offset_allocator", .module = test_mod }},
+            .imports = &.{
+                .{ .name = "offset_allocator", .module = test_mod },
+                .{ .name = "build_options", .module = test_options_mod },
+            },
         }),
         .filters = test_filters,
     });
@@ -129,7 +140,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = test_optimize,
             .link_libc = true,
-            .imports = &.{.{ .name = "offset_allocator", .module = test_mod }},
+            .imports = &.{
+                .{ .name = "offset_allocator", .module = test_mod },
+                .{ .name = "build_options", .module = test_options_mod },
+            },
         }),
         .filters = test_filters,
     });

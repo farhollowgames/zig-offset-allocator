@@ -11,6 +11,9 @@ const testing = std.testing;
 const oa = @import("offset_allocator");
 const small_float = oa.small_float;
 
+/// `-Dfuzz-seed=N`, XORed into every recorded seed; 0 keeps them.
+const fuzz_seed: u64 = @import("build_options").fuzz_seed;
+
 /// An allocator of the original, behind the shim's C ABI.
 const Cxx = opaque {};
 
@@ -269,12 +272,22 @@ fn randomSize(random: std.Random, config: Config) u32 {
     };
 }
 
-fn run(comptime Allocator: type, comptime Ref: type, seed: u64, config: Config) !void {
+fn run(comptime Allocator: type, comptime Ref: type, recorded: u64, config: Config) !void {
+    const seed = recorded ^ fuzz_seed;
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
     errdefer std.debug.print(
-        "differential: seed {d}, total {d}, max_allocs {d}, max_size {d}, steps {d}\n",
-        .{ seed, config.total, config.max_allocs, config.max_size, config.steps },
+        "differential: seed 0x{x} (recorded 0x{x}, -Dfuzz-seed={d}), total {d}, " ++
+            "max_allocs {d}, max_size {d}, steps {d}\n",
+        .{
+            seed,
+            recorded,
+            fuzz_seed,
+            config.total,
+            config.max_allocs,
+            config.max_size,
+            config.steps,
+        },
     );
 
     var pair = try Pair(Allocator, Ref).init(config.total, config.max_allocs);
@@ -399,7 +412,8 @@ test "allocator: fuzzed spaces, node counts and calls, both widths" {
     }
 }
 
-fn fuzz(comptime Allocator: type, comptime Ref: type, seed: u64) !void {
+fn fuzz(comptime Allocator: type, comptime Ref: type, recorded: u64) !void {
+    const seed = recorded ^ fuzz_seed;
     var prng: std.Random.DefaultPrng = .init(seed);
     const random = prng.random();
     const total = fuzzTotal(random);
@@ -407,8 +421,9 @@ fn fuzz(comptime Allocator: type, comptime Ref: type, seed: u64) !void {
     const max_allocs = random.intRangeAtMost(u32, 2, @as(u32, 4) << random.uintAtMost(u5, 10));
     const steps = random.intRangeAtMost(u32, 50, 400);
     errdefer std.debug.print(
-        "differential fuzz: seed 0x{x}, total {d}, max_allocs {d}, steps {d}\n",
-        .{ seed, total, max_allocs, steps },
+        "differential fuzz: seed 0x{x} (recorded 0x{x}, -Dfuzz-seed={d}), total {d}, " ++
+            "max_allocs {d}, steps {d}\n",
+        .{ seed, recorded, fuzz_seed, total, max_allocs, steps },
     );
 
     var pair = try Pair(Allocator, Ref).init(total, max_allocs);

@@ -151,11 +151,16 @@ build switch of the original.
 
 ### Fuzzing
 
-The fuzz seeds are fixed: `0xf022_0000` plus the case number for the
+The fuzz seeds are recorded: `0xf022_0000` plus the case number for the
 differential fuzzing, `0x9e37_0000` for the properties and `0x7a46_0000`
-for `Ranges`, cases 0 to 999. A failure prints the seed and the
-configuration of its run, as every random run does. This repository has no
-`-Dfuzz-seed` option yet; other seeds need an edit of the test.
+for `Ranges`, cases 0 to 999, and small fixed seeds for the differential
+runs and the fixed configurations of the properties and `Ranges`.
+
+`zig build test -Dfuzz-seed=N` XORs `N` into every one of these seeds, so
+each other `N` checks other inputs; the default, 0, keeps the recorded
+seeds. A failure prints the seed it ran with, the recorded seed,
+`N`, and the configuration of its run, so the same `-Dfuzz-seed=N`
+repeats it.
 
 ### Malformed input and contracts
 
