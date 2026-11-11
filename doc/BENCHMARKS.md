@@ -18,8 +18,11 @@ same requests.
   side can skip work.
 - **Runs**: every side runs once to warm up, then the runs rotate the order
   of the sides. Times are ns per call: the median of 11 runs with the
-  interquartile range in brackets, the best median of 10 invocations of
-  `zig build bench`.
+  interquartile range in brackets.
+- **Invocations**: `zig build bench` ran three times for each table. Each
+  row is from the invocation with the median port / original ratio, and
+  the "3 runs" column gives the three invocations' ratios, lowest to
+  highest.
 
 Sizes are a GPU-like mix in 256-byte units: 70 percent 64 B to 16 KiB, 25
 percent to 1 MiB, 5 percent to 16 MiB, in a 16 GiB space with 32768 nodes.
@@ -46,36 +49,34 @@ zig build bench -Dbench-cpu=2          # pin to one CPU with taskset (Linux)
 ## Machine
 
 AMD Ryzen 9 9950X3D, Linux 7.3, Zig 0.17.0 (and its clang for the
-original), 11 November 2026.
-
-**The machine was busy with other builds** during these runs. The numbers
-will be taken again on a quiet machine before a release.
+original), 11 November 2026, at commit `bb82860`. The one-minute load
+average was 2.8 during the runs, on 32 hardware threads.
 
 ## Results, ReleaseFast
 
-| workload | op | node index | original | port | port / original | Ranges | Ranges / port |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| steady state | allocate | u32 | 10.9 (10.9–11.0) | 9.2 (9.2–9.2) | 0.84 | 10.6 (10.6–10.7) | 1.15 |
-| steady state | free | u32 | 13.7 (13.7–13.8) | 13.1 (13.1–13.2) | 0.96 | 13.8 (13.8–13.8) | 1.05 |
-| steady state | allocate | u16 | 10.5 (10.5–10.6) | 8.4 (8.4–8.6) | 0.80 | 10.0 (10.0–10.1) | 1.19 |
-| steady state | free | u16 | 13.0 (13.0–13.0) | 12.2 (12.2–12.3) | 0.94 | 12.9 (12.9–12.9) | 1.06 |
-| fill, free all | allocate | u32 | 4.5 (4.5–4.5) | 4.3 (4.3–4.3) | 0.96 | 5.0 (5.0–5.1) | 1.16 |
-| fill, free all | free | u32 | 8.1 (8.1–8.6) | 7.8 (7.8–8.2) | 0.96 | 8.6 (8.5–8.9) | 1.10 |
-| fill, free all | allocate | u16 | 7.1 (7.1–7.1) | 5.0 (5.0–5.1) | 0.70 | 5.9 (5.9–5.9) | 1.18 |
-| fill, free all | free | u16 | 7.1 (7.0–7.6) | 6.7 (6.7–7.2) | 0.94 | 7.2 (7.0–7.6) | 1.07 |
-| churn | allocate | u32 | 3.8 (3.8–3.9) | 3.9 (3.9–3.9) | 1.03 | 4.7 (4.7–4.7) | 1.21 |
-| churn | free | u32 | 5.0 (5.0–5.0) | 4.6 (4.6–4.6) | 0.92 | 4.6 (4.6–4.6) | 1.00 |
-| churn | allocate | u16 | 7.1 (7.1–7.1) | 5.1 (5.0–5.2) | 0.72 | 5.5 (5.5–5.6) | 1.08 |
-| churn | free | u16 | 5.7 (5.7–5.7) | 4.5 (4.5–4.5) | 0.79 | 4.7 (4.7–4.7) | 1.04 |
-| reset | reset | u32 | 11949 (11938–11973) | 6020 (6000–6075) | 0.50 | 7090 (7077–7169) | 1.18 |
-| reset | reset | u16 | 10938 (10911–10963) | 3193 (3163–3224) | 0.29 | 3893 (3856–3931) | 1.22 |
-| storageReportFull | report | u32 | 13868 (13819–13922) | 13586 (13557–13627) | 0.98 | 13655 (13584–13826) | 1.01 |
-| storageReportFull | report | u16 | 12175 (12162–12184) | 11879 (11842–11912) | 0.98 | 12176 (12170–12249) | 1.03 |
+| workload | op | node index | original | port | port / original | 3 runs | Ranges | Ranges / port |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| steady state | allocate | u32 | 11.0 (10.9–11.1) | 9.3 (9.2–9.3) | 0.84 | 0.84–0.84 | 10.7 (10.6–10.7) | 1.15 |
+| steady state | free | u32 | 13.7 (13.7–13.7) | 13.1 (13.0–13.1) | 0.96 | 0.95–0.96 | 13.7 (13.7–13.7) | 1.05 |
+| steady state | allocate | u16 | 10.8 (10.8–10.8) | 8.5 (8.5–8.6) | 0.79 | 0.79–0.79 | 10.1 (10.1–10.1) | 1.18 |
+| steady state | free | u16 | 13.0 (13.0–13.1) | 12.2 (12.2–12.2) | 0.94 | 0.94–0.94 | 12.9 (12.9–13.0) | 1.06 |
+| fill, free all | allocate | u32 | 4.5 (4.5–4.5) | 4.3 (4.3–4.3) | 0.95 | 0.95–0.96 | 5.0 (5.0–5.0) | 1.17 |
+| fill, free all | free | u32 | 8.2 (8.1–8.6) | 7.8 (7.8–8.2) | 0.96 | 0.96–0.96 | 8.7 (8.5–9.0) | 1.11 |
+| fill, free all | allocate | u16 | 7.1 (7.1–7.1) | 5.0 (5.0–5.1) | 0.71 | 0.71–0.71 | 5.9 (5.9–5.9) | 1.17 |
+| fill, free all | free | u16 | 7.1 (7.0–7.6) | 6.8 (6.7–7.1) | 0.96 | 0.95–0.97 | 7.2 (7.1–7.6) | 1.06 |
+| churn | allocate | u32 | 3.9 (3.8–3.9) | 4.0 (4.0–4.0) | 1.04 | 1.04–1.04 | 4.8 (4.7–4.8) | 1.18 |
+| churn | free | u32 | 5.0 (5.0–5.1) | 4.6 (4.6–4.6) | 0.91 | 0.91–0.92 | 4.6 (4.6–4.6) | 1.01 |
+| churn | allocate | u16 | 7.1 (7.1–7.1) | 5.1 (5.0–5.1) | 0.71 | 0.71–0.72 | 5.6 (5.5–5.6) | 1.10 |
+| churn | free | u16 | 5.7 (5.7–5.7) | 4.5 (4.5–4.5) | 0.79 | 0.79–0.80 | 4.7 (4.7–4.7) | 1.03 |
+| reset | reset | u32 | 12014 (11974–12050) | 6092 (6072–6209) | 0.51 | 0.51–0.51 | 7151 (7140–7240) | 1.17 |
+| reset | reset | u16 | 10975 (10941–11025) | 3270 (3251–3316) | 0.30 | 0.30–0.30 | 4274 (4255–4318) | 1.31 |
+| storageReportFull | report | u32 | 14301 (14178–14397) | 13620 (13579–13645) | 0.95 | 0.95–0.95 | 13692 (13650–13725) | 1.01 |
+| storageReportFull | report | u16 | 12207 (12119–12266) | 11861 (11764–11882) | 0.97 | 0.97–0.97 | 12385 (12329–12516) | 1.04 |
 
 The port takes less time than the original in every row but churn allocate
-with 32-bit indices, 3.9 against 3.8 ns, within the run-to-run spread. The
-port's loop also checks every allocation for `error.NoSpace`, where the
-original's stores the result unchecked.
+with 32-bit indices, 4.0 against 3.9 ns (1.04 in all three invocations).
+The port's loop also checks every allocation for `error.NoSpace`, where
+the original's stores the result unchecked.
 
 ## The Ranges layer
 
@@ -85,38 +86,42 @@ to 1.6 ns per call over the core, and about 1 µs on a reset of 32768 nodes
 (the generations). Allocate pays most, for the generation it reads into the
 handle.
 
+The 16-bit `Ranges` reset moved the most between invocations, from 4.0 to
+5.0 µs, against 3.3 µs for the core's; earlier runs had it at 3.9 µs.
+
 ## Results, ReleaseSafe
 
 The port's asserts and bounds checks on, and the `Ranges` check; the
 original still at `-O3` without its asserts. Medians:
 
-| workload | op | node index | original | port | port / original | Ranges | Ranges / port |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| steady state | allocate | u32 | 10.9 | 11.0 | 1.01 | 12.3 | 1.12 |
-| steady state | free | u32 | 14.3 | 16.7 | 1.17 | 18.1 | 1.08 |
-| steady state | allocate | u16 | 10.6 | 9.8 | 0.92 | 11.3 | 1.15 |
-| steady state | free | u16 | 12.4 | 14.7 | 1.19 | 15.9 | 1.08 |
-| fill, free all | allocate | u32 | 4.5 | 5.7 | 1.27 | 6.6 | 1.16 |
-| fill, free all | free | u32 | 8.3 | 11.8 | 1.42 | 13.2 | 1.12 |
-| fill, free all | allocate | u16 | 7.0 | 7.3 | 1.04 | 7.7 | 1.05 |
-| fill, free all | free | u16 | 7.0 | 10.3 | 1.47 | 11.2 | 1.09 |
-| churn | allocate | u32 | 3.9 | 5.6 | 1.44 | 6.4 | 1.14 |
-| churn | free | u32 | 5.1 | 6.7 | 1.31 | 7.2 | 1.07 |
-| churn | allocate | u16 | 7.0 | 7.4 | 1.06 | 7.4 | 1.00 |
-| churn | free | u16 | 5.7 | 7.6 | 1.33 | 7.8 | 1.03 |
-| reset | reset | u32 | 12032 | 6125 | 0.51 | 7189 | 1.17 |
-| reset | reset | u16 | 10968 | 3804 | 0.35 | 4565 | 1.20 |
-| storageReportFull | report | u32 | 14274 | 12857 | 0.90 | 12927 | 1.01 |
-| storageReportFull | report | u16 | 12052 | 9859 | 0.82 | 9868 | 1.00 |
+| workload | op | node index | original | port | port / original | 3 runs | Ranges | Ranges / port |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| steady state | allocate | u32 | 10.9 | 11.0 | 1.00 | 1.00–1.01 | 12.3 | 1.12 |
+| steady state | free | u32 | 14.3 | 16.7 | 1.17 | 1.17–1.17 | 18.0 | 1.08 |
+| steady state | allocate | u16 | 10.7 | 9.9 | 0.92 | 0.92–0.92 | 11.4 | 1.15 |
+| steady state | free | u16 | 12.4 | 14.8 | 1.19 | 1.19–1.19 | 16.0 | 1.09 |
+| fill, free all | allocate | u32 | 4.5 | 5.6 | 1.25 | 1.25–1.27 | 6.6 | 1.17 |
+| fill, free all | free | u32 | 8.5 | 11.9 | 1.40 | 1.30–1.40 | 13.3 | 1.12 |
+| fill, free all | allocate | u16 | 7.1 | 7.4 | 1.04 | 1.04–1.04 | 7.8 | 1.05 |
+| fill, free all | free | u16 | 7.2 | 10.5 | 1.47 | 1.44–1.48 | 11.4 | 1.08 |
+| churn | allocate | u32 | 3.9 | 5.8 | 1.49 | 1.44–1.50 | 6.4 | 1.12 |
+| churn | free | u32 | 5.1 | 6.7 | 1.32 | 1.32–1.38 | 7.2 | 1.07 |
+| churn | allocate | u16 | 7.0 | 7.4 | 1.04 | 1.04–1.04 | 7.5 | 1.02 |
+| churn | free | u16 | 5.8 | 7.7 | 1.34 | 1.32–1.35 | 7.9 | 1.03 |
+| reset | reset | u32 | 12239 | 6485 | 0.53 | 0.51–0.54 | 7588 | 1.17 |
+| reset | reset | u16 | 11011 | 3825 | 0.35 | 0.35–0.36 | 4723 | 1.24 |
+| storageReportFull | report | u32 | 14108 | 12705 | 0.90 | 0.90–0.91 | 12811 | 1.01 |
+| storageReportFull | report | u16 | 12175 | 9822 | 0.81 | 0.80–0.81 | 9984 | 1.02 |
 
 `storageReportFull` comes out faster in ReleaseSafe than in ReleaseFast on
 this machine; the two modes lay out its list walk differently.
 
 ## The performance pass
 
-The port before and after its performance pass, ReleaseFast. "Before" was
-measured in an earlier session on the same machine, whose original numbers
-were within 3 percent of these:
+The port before and after its performance pass, ReleaseFast, measured
+during the pass, before the tables above. "Before" was measured in an
+earlier session on the same machine, whose original numbers were within 3
+percent of the "after" session's:
 
 | workload | op | node index | original | port before | port after | after / before |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
@@ -167,7 +172,6 @@ latency, was not tuned.
 
 ## Known biases
 
-- The machine was busy (above).
 - The port checks every allocation for `error.NoSpace` and the original's
   loop does not, which counts against the port.
 - The original runs without its asserts and the port in ReleaseFast without

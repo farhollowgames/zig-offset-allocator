@@ -33,11 +33,10 @@ person.
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/farhollowgames/zig-offset-allocator#main
+zig fetch --save git+https://github.com/farhollowgames/zig-offset-allocator#v0.1.0
 ```
 
-No release is tagged yet. A `v0.1.0` tag is coming; then
-`#v0.1.0` in place of `#main` pins it.
+`v0.1.0` is the latest release.
 
 In `build.zig`:
 
@@ -115,12 +114,12 @@ node indices (below 1, the port takes less time):
 | --- | --- | ---: |
 | steady state | allocate | 0.84 |
 | steady state | free | 0.96 |
-| churn | allocate | 1.03 |
-| reset | reset | 0.50 |
-| storageReportFull | report | 0.98 |
+| churn | allocate | 1.04 |
+| reset | reset | 0.51 |
+| storageReportFull | report | 0.95 |
 
-AMD Ryzen 9 9950X3D, Linux 7.3, Zig 0.17.0, measured while other builds
-ran on the machine.
+AMD Ryzen 9 9950X3D, Linux 7.3, Zig 0.17.0, at commit `bb82860`, with a
+load average of 2.8 on 32 hardware threads; the median of three runs.
 
 - [`doc/TESTING.md`](doc/TESTING.md): how the tests compare the port with
   the original, and what this repository's tests cover.
