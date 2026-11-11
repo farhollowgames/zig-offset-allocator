@@ -10,7 +10,7 @@ same. The tests are in `test/` and run with `zig build test`.
 A state is one of: **not started**; **ported**; **oracle-tested** (tests
 run the original from `reference/` on the same inputs and require identical
 results); **benchmarked** (also measured against the original by
-`zig build bench`, see the README); **reviewed** (set at a release, after
+`zig build bench`, see `doc/BENCHMARKS.md`); **reviewed** (set at a release, after
 the skeptic's review). Every state includes the ones before it.
 
 A "differential" test runs the original C++ on the same calls and requires
@@ -92,6 +92,15 @@ every-u32 sweep shows the results are the same.
   message): the contract breaks listed above, the port's own checks
   (`init_one_node`: fewer than 2 nodes), and stale `Ranges` handles.
 
+## Left out
+
+- `DEBUG_VERBOSE`: debug printing of freelist and free storage changes; it
+  changes no result.
+- `USE_16_BIT_OFFSETS`: commented out at the top of the header, and never
+  defined or read anywhere in the original.
+
+The rows above say the same in the build-time switches table.
+
 ## Differences, and why
 
 - **Node arrays come from a `std.mem.Allocator` at `init`**, as the
@@ -125,7 +134,7 @@ every-u32 sweep shows the results are the same.
   Zig value is copied, and the caller stops using the old copy.
 - **The node's fields are in another order**: `used` comes before the four
   indices, which lets a new node's indices be stored as one vector apart
-  from its size (see the README's benchmark). The tests compare nodes field
+  from its size (see `doc/BENCHMARKS.md`). The tests compare nodes field
   by field, so the order is not visible to them or to callers.
 - **The 16-bit reference needs `-Wno-c++11-narrowing`**: the original's
   braced initializers narrow `uint32` into the 16-bit `NodeIndex`, which
@@ -146,7 +155,7 @@ comparisons above still cover every line of the translation.
 | zig-offset-allocator | state | tests |
 | --- | --- | --- |
 | `Ranges`, `Ranges16`, `RangesOf(Core)`; `init`, `deinit`, `unitBytes` | ported | `test/ranges_test.zig`: fixed configurations and 1000 fuzzed seeds per width, against a model of the live ranges |
-| `allocate`, `free` | benchmarked | the same; every offset a multiple of the unit, no shared bytes, sizes rounded up to the unit; the README's benchmark measures the layer's cost over the core |
+| `allocate`, `free` | benchmarked | the same; every offset a multiple of the unit, no shared bytes, sizes rounded up to the unit; `doc/BENCHMARKS.md` measures the layer's cost over the core |
 | `reset` | benchmarked | every outstanding handle goes stale |
 | `checkHandle`, `isLive`, `HandleError` | ported | stale, foreign and never-allocated handles; panic: `ranges_free_twice`, `ranges_free_after_reset` |
 | `sizeOf`, `storageReport`, `storageReportFull` | ported | in bytes, against the model |

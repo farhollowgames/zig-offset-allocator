@@ -57,7 +57,7 @@ pub const HandleError = error{
 ///
 /// The generations stay in every build mode, ReleaseFast included; only the
 /// check in `free` compiles out there. They cost one u32 per node, one load
-/// in `allocate` and one store in `free` (see the README's benchmark), and in
+/// in `allocate` and one store in `free` (see doc/BENCHMARKS.md), and in
 /// return `isLive` answers in every mode, `reset` invalidates every handle
 /// in every mode, and `Handle` has one layout whatever the mode, so code
 /// built in different modes agrees on it.
