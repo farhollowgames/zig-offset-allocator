@@ -129,7 +129,17 @@ pub fn RangesOf(comptime Core: type) type {
         /// outstanding handle goes stale. O(max_allocs), as the core's.
         pub fn reset(self: *Self) void {
             self.core.reset();
-            for (self.generations) |*generation| generation.* +%= 1;
+            // Whole vectors, then the rest: the compiler leaves the plain
+            // loop scalar.
+            const generations = self.generations;
+            const lanes = 64 / @sizeOf(u32);
+            const Lanes = @Vector(lanes, u32);
+            var i: usize = 0;
+            while (i + lanes <= generations.len) : (i += lanes) {
+                const next: Lanes = generations[i..][0..lanes].*;
+                generations[i..][0..lanes].* = next +% @as(Lanes, @splat(1));
+            }
+            for (generations[i..]) |*generation| generation.* +%= 1;
         }
 
         /// A range of at least `size_bytes` bytes, rounded up to whole

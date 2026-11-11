@@ -66,43 +66,29 @@ pub const small_float = struct {
     /// The smallest bin whose size is at least `size`: the bin an
     /// allocation of `size` can come from. 0 to 240.
     pub fn uintToFloatRoundUp(size: u32) u32 {
-        var exp: u32 = 0;
-        var mantissa: u32 = 0;
-
-        if (size < mantissa_value) {
-            // Denorm: 0..(mantissa_value - 1).
-            mantissa = size;
-        } else {
-            // Normalized: the hidden high bit is always 1 and not stored.
-            const highest_set_bit: u5 = @intCast(31 - @clz(size));
-            const mantissa_start_bit = highest_set_bit - mantissa_bits;
-            exp = @as(u32, mantissa_start_bit) + 1;
-            mantissa = (size >> mantissa_start_bit) & mantissa_mask;
-
-            const low_bits_mask = (@as(u32, 1) << mantissa_start_bit) - 1;
-            if (size & low_bits_mask != 0) mantissa += 1;
-        }
-
-        // Adding (not or-ing) lets the mantissa carry into the exponent.
-        return (exp << mantissa_bits) + mantissa;
+        // Rounding down, then up a bin when any bit below the mantissa is
+        // set. Adding (not or-ing) lets the mantissa carry into the exponent.
+        const start = mantissaStartBit(size);
+        return uintToFloatRoundDown(size) + @intFromBool((size >> start) << start != size);
     }
 
     /// The largest bin whose size is at most `size`: the bin a free region
     /// of `size` goes in. 0 to 239.
     pub fn uintToFloatRoundDown(size: u32) u32 {
-        var exp: u32 = 0;
-        var mantissa: u32 = 0;
+        // With the hidden bit kept, `size >> start` is the mantissa plus
+        // `mantissa_value`, which adds the 1 the exponent is ahead of
+        // `start`. A denorm (below `mantissa_value`) starts at bit 0 and is
+        // its own mantissa.
+        const start = mantissaStartBit(size);
+        return (@as(u32, start) << mantissa_bits) + (size >> start);
+    }
 
-        if (size < mantissa_value) {
-            mantissa = size;
-        } else {
-            const highest_set_bit: u5 = @intCast(31 - @clz(size));
-            const mantissa_start_bit = highest_set_bit - mantissa_bits;
-            exp = @as(u32, mantissa_start_bit) + 1;
-            mantissa = (size >> mantissa_start_bit) & mantissa_mask;
-        }
-
-        return (exp << mantissa_bits) | mantissa;
+    /// The lowest bit of `size`'s mantissa: `mantissa_bits` below its
+    /// highest set bit, or 0 for a denorm. The original branches on denorms;
+    /// setting bit `mantissa_bits` gives the same without a branch, since it
+    /// leaves a normalized size's highest bit and lifts a denorm's to it.
+    fn mantissaStartBit(size: u32) u5 {
+        return @intCast((31 - mantissa_bits) - @clz(size | mantissa_value));
     }
 
     /// The size of bin `float_value`, which must be below 264: the original
@@ -176,14 +162,19 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             pub const none: Allocation = .{ .offset = no_space, .metadata = unused };
         };
 
-        pub const Node = struct {
+        /// A free region or an allocation: the original's fields, with
+        /// `used` moved ahead of the indices (`extern` keeps this order).
+        /// A new node's four indices are then stored as one vector and its
+        /// size on its own, so a read of the size soon after, as the next
+        /// `free` of a neighbour makes, does not wait for the vector.
+        pub const Node = extern struct {
             data_offset: u32 = 0,
             data_size: u32 = 0,
+            used: bool = false,
             bin_list_prev: NodeIndex = unused,
             bin_list_next: NodeIndex = unused,
             neighbor_prev: NodeIndex = unused,
             neighbor_next: NodeIndex = unused,
-            used: bool = false,
         };
 
         /// An allocator over `size` units, with room for `max_allocs` nodes
@@ -231,12 +222,33 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             @memset(&self.bin_indices, unused);
 
             // The original allocates fresh, default-initialized arrays here.
-            @memset(self.nodes, .{});
+            // Copying 16 nodes at a time lets the stores be whole vectors: a
+            // node is 28 bytes (20 with 16-bit indices), which no vector
+            // store fits.
+            const nodes = self.nodes;
+            const block: [16]Node = @splat(.{});
+            var i: usize = 0;
+            while (i + block.len <= nodes.len) : (i += block.len) {
+                nodes[i..][0..block.len].* = block;
+            }
+            @memset(nodes[i..], .{});
 
             // The freelist is a stack. Nodes in inverse order so that [0]
             // pops first.
-            for (self.free_nodes, 0..) |*free_node, i| {
-                free_node.* = @intCast(self.max_allocs - i - 1);
+            const free_nodes = self.free_nodes;
+            const lanes = 64 / @sizeOf(NodeIndex);
+            const Lanes = @Vector(lanes, NodeIndex);
+            // With fewer nodes than lanes, the lanes below 0 wrap, and the
+            // loop stores none of them.
+            var descending: Lanes = @as(Lanes, @splat(@intCast(free_nodes.len - 1))) -%
+                std.simd.iota(NodeIndex, lanes);
+            var j: usize = 0;
+            while (j + lanes <= free_nodes.len) : (j += lanes) {
+                free_nodes[j..][0..lanes].* = descending;
+                descending -%= @splat(lanes);
+            }
+            for (free_nodes[j..], j..) |*free_node, k| {
+                free_node.* = @intCast(free_nodes.len - 1 - k);
             }
 
             // Start state: the whole storage as one big node. The algorithm
@@ -246,9 +258,24 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
 
         /// A contiguous range of `size` units, or `error.NoSpace` when no
         /// free region fits it or no node is left.
-        pub fn allocate(self: *Self, size: u32) error{NoSpace}!Allocation {
+        pub inline fn allocate(self: *Self, size: u32) error{NoSpace}!Allocation {
+            const allocation = self.allocatePacked(size);
+            if (allocation.offset == no_space) return error.NoSpace;
+            return .{ .offset = allocation.offset, .metadata = allocation.metadata };
+        }
+
+        /// `Allocation` as one integer, which a function returns in a
+        /// register; a struct comes back through memory.
+        const PackedAllocation = packed struct { offset: u32, metadata: NodeIndex };
+
+        /// The original's `allocate`: offset `no_space` when out of space or
+        /// nodes. No allocation has that offset: every offset is below
+        /// `size`, or 0 when `size` is 0.
+        fn allocatePacked(self: *Self, size: u32) PackedAllocation {
+            const none: PackedAllocation = .{ .offset = no_space, .metadata = unused };
+
             // Out of nodes?
-            if (self.free_offset == 0) return error.NoSpace;
+            if (self.free_offset == 0) return none;
 
             // Round up to a bin index so that the bin is at least the size:
             // the smallest bin that fits.
@@ -271,8 +298,7 @@ pub fn AllocatorOf(comptime NodeIndex: type) type {
             // largest top bin is 30, so this never passes 31.)
             if (leaf_bin_index == null) {
                 const above = min_top_bin_index + 1;
-                top_bin_index = findLowestSetBitAfter(self.used_bins_top, above) orelse
-                    return error.NoSpace;
+                top_bin_index = findLowestSetBitAfter(self.used_bins_top, above) orelse return none;
 
                 // Every leaf bin here fits, since the top bin was rounded
                 // up: take the lowest. Its top bit is set, so one is.
