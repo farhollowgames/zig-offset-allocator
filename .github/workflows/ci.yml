@@ -14,6 +14,6 @@ jobs:
         with:
           version: 0.17.0
       - name: Formatting
-        run: zig fmt --check build.zig src test
+        run: zig fmt --check build.zig src test bench
       - name: Unit, property and differential tests
         run: zig build test --summary all
