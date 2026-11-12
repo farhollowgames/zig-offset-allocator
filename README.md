@@ -107,23 +107,23 @@ asserts on, beside both widths of the port, about 2.07 million calls and
 1,000 fuzzed configurations per width, and compare every result and every
 field of the allocator's state after each call.
 
-Time per call of the port divided by the original's, ReleaseFast, 32-bit
-node indices (below 1, the port takes less time):
+Time per call of the port against the original's, ReleaseFast, 32-bit
+node indices:
 
-| workload | op | port / original |
+| workload | op | port vs original |
 | --- | --- | ---: |
-| steady state | allocate | 0.84 |
-| steady state | free | 0.96 |
-| churn | allocate | 1.04 |
-| reset | reset | 0.51 |
-| storageReportFull | report | 0.95 |
+| steady state | allocate | 16% faster |
+| steady state | free | 4% faster |
+| churn | allocate | 4% slower |
+| reset | reset | 49% faster |
+| storageReportFull | report | 5% faster |
 
 AMD Ryzen 9 9950X3D, Linux 7.3, Zig 0.17.0, at commit `bb82860`, with a
 load average of 2.8 on 32 hardware threads; the median of three runs.
 
 - [`doc/TESTING.md`](doc/TESTING.md): how the tests compare the port with
   the original, and what this repository's tests cover.
-- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every row, both widths,
+- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): ratios and full tables: every row, both widths,
   ReleaseSafe, the `Ranges` layer, the flags and the command.
 
 ## Licence and references
