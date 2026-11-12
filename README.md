@@ -12,7 +12,7 @@ itself. The original and its references are listed under
 
 This port is not affiliated with or reviewed by the original authors. Its
 code was written with AI assistance for Farhollow Games, and is only machine
-verified. See [the tests](doc/TESTING.md) and [parity with the original](STATUS.md).
+verified. See [the tests](doc/TESTING.md) and [parity with the original](doc/parity.md).
 
 ## Features
 
@@ -74,7 +74,7 @@ structures. [`doc/API.md`](doc/API.md) describes the allocator and the
 
 ## Differences from the original
 
-The reasons are in [`STATUS.md`](STATUS.md#differences-and-why).
+The reasons are in [`doc/parity.md`](doc/parity.md).
 
 *Additions*:
 
@@ -107,8 +107,8 @@ asserts on, beside both widths of the port, about 2.07 million calls and
 1,000 fuzzed configurations per width, and compare every result and every
 field of the allocator's state after each call.
 
-Time per call of the port against the original's, ReleaseFast, 32-bit
-node indices:
+Port time per call against original time, ReleaseFast, 32-bit node
+indices:
 
 | workload | op | port vs original |
 | --- | --- | ---: |
