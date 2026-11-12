@@ -10,9 +10,9 @@ or an array, and returns offsets into it. It never touches the space
 itself. The original and its references are listed under
 [Licence and references](#licence-and-references).
 
-This port is not affiliated with or reviewed by the original's author. Its
-code was written with AI assistance and has not yet been reviewed by a
-person.
+This port is not affiliated with or reviewed by the original authors. Its
+code was written with AI assistance for Farhollow Games, and is only machine
+verified. See [the tests](doc/TESTING.md) and [parity with the original](STATUS.md).
 
 ## Features
 
